@@ -1,0 +1,62 @@
+name: Release Chrome Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '"version"' manifest.json | cut -d'"' -f4)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extension version: $VERSION"
+
+      - name: Create extension package
+        run: |
+          mkdir -p dist
+          zip -r dist/tabnest-v${{ steps.version.outputs.version }}.zip \
+            manifest.json \
+            background.js \
+            popup.html \
+            popup.js \
+            popup.css \
+            options.html \
+            options.js \
+            icons/ \
+            -x "*.DS_Store"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: TabNest v${{ steps.version.outputs.version }}
+          body: |
+            ## TabNest v${{ steps.version.outputs.version }}
+            
+            ### Installation
+            1. Download `tabnest-v${{ steps.version.outputs.version }}.zip`
+            2. Unzip the file
+            3. Open Chrome → `chrome://extensions/`
+            4. Enable "Developer mode"
+            5. Click "Load unpacked" and select the unzipped folder
+            
+            ### Features
+            - URL hierarchy-based grouping
+            - Smart domain detection (GitHub, GitLab, docs sites)
+            - Optional AI integration
+            - Auto-group new tabs
+          files: dist/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
