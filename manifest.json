@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabNest",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Intelligent tab grouping with URL hierarchy & content understanding",
   "permissions": [
     "tabs",

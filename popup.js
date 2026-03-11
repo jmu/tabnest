@@ -11,7 +11,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.disabled = true;
     
     try {
-      await chrome.runtime.sendMessage({ action: 'groupAll' });
+      const response = await chrome.runtime.sendMessage({ action: 'groupAll' });
+      if (response && !response.success) {
+        alert('Error: ' + (response.error || 'Unknown error'));
+      }
       await updateStats();
     } catch (error) {
       console.error('Group all failed:', error);
@@ -30,7 +33,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.disabled = true;
     
     try {
-      await chrome.runtime.sendMessage({ action: 'groupCurrentWindow' });
+      const response = await chrome.runtime.sendMessage({ action: 'groupCurrentWindow' });
+      if (response && !response.success) {
+        alert('Error: ' + (response.error || 'Unknown error'));
+      }
       await updateStats();
     } catch (error) {
       console.error('Group current window failed:', error);
@@ -44,18 +50,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Ungroup all
   document.getElementById('ungroupAll').addEventListener('click', async () => {
     const btn = document.getElementById('ungroupAll');
+    const originalContent = btn.innerHTML;
     btn.innerHTML = '<span class="icon">⏳</span> Ungrouping...';
     btn.disabled = true;
     
     try {
-      await chrome.runtime.sendMessage({ action: 'ungroupAll' });
+      const response = await chrome.runtime.sendMessage({ action: 'ungroupAll' });
+      if (response && !response.success) {
+        alert('Error: ' + (response.error || 'Unknown error'));
+      }
       await updateStats();
     } catch (error) {
       console.error('Ungroup failed:', error);
       alert('Error: ' + error.message);
     }
     
-    btn.innerHTML = '<span class="icon">📤</span> Ungroup All';
+    btn.innerHTML = originalContent;
     btn.disabled = false;
   });
 
