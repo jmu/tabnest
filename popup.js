@@ -3,28 +3,30 @@
 document.addEventListener('DOMContentLoaded', async () => {
   await updateStats();
 
-  // Group all tabs
+  // Group all tabs (all windows)
   document.getElementById('groupAll').addEventListener('click', async () => {
     const btn = document.getElementById('groupAll');
-    btn.textContent = '⏳ Grouping...';
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<span class="icon">⏳</span> Grouping...';
     btn.disabled = true;
     
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      await chrome.tabs.sendMessage(tab.id, { action: 'groupAll' });
+      await chrome.runtime.sendMessage({ action: 'groupAll' });
       await updateStats();
     } catch (error) {
       console.error('Group all failed:', error);
+      alert('Error: ' + error.message);
     }
     
-    btn.innerHTML = '<span class="icon">🔀</span> Group All Tabs';
+    btn.innerHTML = originalContent;
     btn.disabled = false;
   });
 
-  // Group current window
+  // Group current window only
   document.getElementById('groupCurrent').addEventListener('click', async () => {
     const btn = document.getElementById('groupCurrent');
-    btn.textContent = '⏳ Grouping...';
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<span class="icon">⏳</span> Grouping...';
     btn.disabled = true;
     
     try {
@@ -32,20 +34,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       await updateStats();
     } catch (error) {
       console.error('Group current window failed:', error);
+      alert('Error: ' + error.message);
     }
     
-    btn.innerHTML = '<span class="icon">📌</span> Group Current Window';
+    btn.innerHTML = originalContent;
     btn.disabled = false;
   });
 
   // Ungroup all
   document.getElementById('ungroupAll').addEventListener('click', async () => {
+    const btn = document.getElementById('ungroupAll');
+    btn.innerHTML = '<span class="icon">⏳</span> Ungrouping...';
+    btn.disabled = true;
+    
     try {
       await chrome.runtime.sendMessage({ action: 'ungroupAll' });
       await updateStats();
     } catch (error) {
       console.error('Ungroup failed:', error);
+      alert('Error: ' + error.message);
     }
+    
+    btn.innerHTML = '<span class="icon">📤</span> Ungroup All';
+    btn.disabled = false;
   });
 
   // Settings
@@ -55,9 +66,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function updateStats() {
-  const tabs = await chrome.tabs.query({});
-  const groups = await chrome.tabGroups.query({});
-  
-  document.getElementById('tabCount').textContent = tabs.length;
-  document.getElementById('groupCount').textContent = groups.length;
+  try {
+    const tabs = await chrome.tabs.query({});
+    const groups = await chrome.tabGroups.query({});
+    
+    document.getElementById('tabCount').textContent = tabs.length;
+    document.getElementById('groupCount').textContent = groups.length;
+  } catch (error) {
+    console.error('Update stats failed:', error);
+  }
 }

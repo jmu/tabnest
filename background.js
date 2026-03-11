@@ -1,10 +1,34 @@
 // background.js - Service worker
 
+// Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('Received message:', message.action);
+  
+  if (message.action === 'groupAll') {
+    groupAllWindows().then(() => {
+      sendResponse({ success: true });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+    return true; // Keep message channel open for async response
+  }
+  
   if (message.action === 'groupCurrentWindow') {
-    groupCurrentWindow();
-  } else if (message.action === 'ungroupAll') {
-    ungroupAll();
+    groupCurrentWindow().then(() => {
+      sendResponse({ success: true });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+    return true;
+  }
+  
+  if (message.action === 'ungroupAll') {
+    ungroupAll().then(() => {
+      sendResponse({ success: true });
+    }).catch(error => {
+      sendResponse({ success: false, error: error.message });
+    });
+    return true;
   }
 });
 
@@ -20,40 +44,59 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 // ==================== Core Grouping Logic ====================
 
 async function groupCurrentWindow() {
+  console.log('Grouping current window...');
   const tabs = await chrome.tabs.query({ currentWindow: true });
+  console.log(`Found ${tabs.length} tabs in current window`);
   const groups = await analyzeAndGroup(tabs);
   
   for (const [groupKey, tabIds] of Object.entries(groups)) {
     if (tabIds.length > 1) {
-      const groupId = await chrome.tabs.group({ tabIds });
-      await chrome.tabGroups.update(groupId, {
-        title: groupKey,
-        color: getGroupColor(groupKey)
-      });
+      try {
+        const groupId = await chrome.tabs.group({ tabIds });
+        await chrome.tabGroups.update(groupId, {
+          title: groupKey,
+          color: getGroupColor(groupKey)
+        });
+        console.log(`Created group: ${groupKey} with ${tabIds.length} tabs`);
+      } catch (error) {
+        console.error(`Failed to create group ${groupKey}:`, error);
+      }
     }
   }
 }
 
 async function groupAllWindows() {
+  console.log('Grouping all windows...');
   const tabs = await chrome.tabs.query({});
+  console.log(`Found ${tabs.length} tabs total`);
   const groups = await analyzeAndGroup(tabs);
   
   for (const [groupKey, tabIds] of Object.entries(groups)) {
     if (tabIds.length > 1) {
-      const groupId = await chrome.tabs.group({ tabIds });
-      await chrome.tabGroups.update(groupId, {
-        title: groupKey,
-        color: getGroupColor(groupKey)
-      });
+      try {
+        const groupId = await chrome.tabs.group({ tabIds });
+        await chrome.tabGroups.update(groupId, {
+          title: groupKey,
+          color: getGroupColor(groupKey)
+        });
+        console.log(`Created group: ${groupKey} with ${tabIds.length} tabs`);
+      } catch (error) {
+        console.error(`Failed to create group ${groupKey}:`, error);
+      }
     }
   }
 }
 
 async function ungroupAll() {
+  console.log('Ungrouping all tabs...');
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
-      await chrome.tabs.ungroup(tab.id);
+      try {
+        await chrome.tabs.ungroup(tab.id);
+      } catch (error) {
+        console.error(`Failed to ungroup tab ${tab.id}:`, error);
+      }
     }
   }
 }
