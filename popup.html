@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TabNest</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🪹 TabNest</h1>
+      <p class="subtitle">Intelligent Tab Grouping</p>
+    </header>
+
+    <main>
+      <button id="groupAll" class="btn btn-primary">
+        <span class="icon">🔀</span> Group All Tabs
+      </button>
+      
+      <button id="groupCurrent" class="btn btn-secondary">
+        <span class="icon">📌</span> Group Current Window
+      </button>
+
+      <button id="ungroupAll" class="btn btn-danger">
+        <span class="icon">📤</span> Ungroup All
+      </button>
+
+      <div class="stats" id="stats">
+        <div class="stat-item">
+          <span class="stat-label">Tabs:</span>
+          <span class="stat-value" id="tabCount">0</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Groups:</span>
+          <span class="stat-value" id="groupCount">0</span>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <button id="settings" class="btn-link">⚙️ Settings</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
