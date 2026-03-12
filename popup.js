@@ -47,6 +47,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.disabled = false;
   });
 
+  // Group by timeline
+  document.getElementById('groupTimeline').addEventListener('click', async () => {
+    const btn = document.getElementById('groupTimeline');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<span class="icon">⏳</span> Grouping...';
+    btn.disabled = true;
+    
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'groupTimeline', windowId: 'all' });
+      if (response && !response.success) {
+        alert('Error: ' + (response.error || 'Unknown error'));
+      }
+      await updateStats();
+    } catch (error) {
+      console.error('Group by timeline failed:', error);
+      alert('Error: ' + error.message);
+    }
+    
+    btn.innerHTML = originalContent;
+    btn.disabled = false;
+  });
+
   // Ungroup all
   document.getElementById('ungroupAll').addEventListener('click', async () => {
     const btn = document.getElementById('ungroupAll');

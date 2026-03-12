@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     useUrlHierarchy: true,
     useContentAnalysis: false,
     autoGroup: false,
+    timelineThreshold: 5,
     llmEnabled: false,
     llmApiKey: '',
     llmApiUrl: 'https://api.openai.com/v1/chat/completions',
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('useUrlHierarchy').checked = settings.useUrlHierarchy;
   document.getElementById('useContentAnalysis').checked = settings.useContentAnalysis;
   document.getElementById('autoGroup').checked = settings.autoGroup;
+  document.getElementById('timelineThreshold').value = settings.timelineThreshold;
   document.getElementById('llmEnabled').checked = settings.llmEnabled;
   document.getElementById('llmApiKey').value = settings.llmApiKey;
   document.getElementById('llmApiUrl').value = settings.llmApiUrl;
@@ -27,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       useUrlHierarchy: document.getElementById('useUrlHierarchy').checked,
       useContentAnalysis: document.getElementById('useContentAnalysis').checked,
       autoGroup: document.getElementById('autoGroup').checked,
+      timelineThreshold: parseInt(document.getElementById('timelineThreshold').value) || 5,
       llmEnabled: document.getElementById('llmEnabled').checked,
       llmApiKey: document.getElementById('llmApiKey').value,
       llmApiUrl: document.getElementById('llmApiUrl').value || 'https://api.openai.com/v1/chat/completions',

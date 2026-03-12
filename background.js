@@ -1,5 +1,8 @@
 // background.js - Service worker
 
+// Timeline tracking: store tab creation times
+const tabTimeline = new Map(); // tabId -> { createdAt, url, windowId, title }
+
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Received message:', message.action);
@@ -11,6 +14,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       } else if (message.action === 'groupCurrentWindow') {
         await groupCurrentWindow();
+        sendResponse({ success: true });
+      } else if (message.action === 'groupTimeline') {
+        await groupByTimeline(message.windowId === 'all' ? null : message.windowId);
         sendResponse({ success: true });
       } else if (message.action === 'ungroupAll') {
         await ungroupAll();
@@ -30,16 +36,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Track pending auto-group to avoid duplicates
 let pendingAutoGroup = null;
 
-// Auto-group when tab is updated (loaded)
+// Track tab creation for timeline grouping
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab.id && tab.windowId) {
+    tabTimeline.set(tab.id, {
+      createdAt: Date.now(),
+      url: tab.url || tab.pendingUrl || '',
+      windowId: tab.windowId,
+      title: tab.title || ''
+    });
+    console.log(`Tab ${tab.id} created at ${new Date().toLocaleTimeString()}`);
+  }
+});
+
+// Update timeline when tab URL changes and handle auto-group
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Update URL in timeline
+  if (changeInfo.url && tabTimeline.has(tabId)) {
+    const entry = tabTimeline.get(tabId);
+    entry.url = changeInfo.url;
+  }
+  
+  // Update title
+  if (changeInfo.title && tabTimeline.has(tabId)) {
+    const entry = tabTimeline.get(tabId);
+    entry.title = changeInfo.title;
+  }
+  
+  // Auto-group when tab is loaded
   if (changeInfo.status === 'complete' && tab.url) {
     const settings = await getSettings();
     if (settings.autoGroup) {
-      // Debounce rapid updates
       clearTimeout(pendingAutoGroup);
       pendingAutoGroup = setTimeout(() => autoGroupTab(tab), 500);
     }
   }
+});
+
+// Clean up timeline when tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabTimeline.delete(tabId);
 });
 
 // ==================== Core Grouping Logic ====================
@@ -49,9 +85,7 @@ async function groupCurrentWindow() {
   const tabs = await chrome.tabs.query({ currentWindow: true });
   console.log(`Found ${tabs.length} tabs in current window`);
   
-  // First ungroup all tabs
   await ungroupTabs(tabs);
-  
   const groups = await analyzeAndGroup(tabs);
   await createGroups(groups);
 }
@@ -59,7 +93,6 @@ async function groupCurrentWindow() {
 async function groupAllWindows() {
   console.log('Grouping all windows...');
   
-  // Get all tabs grouped by window
   const allTabs = await chrome.tabs.query({});
   const windowTabs = {};
   
@@ -72,17 +105,127 @@ async function groupAllWindows() {
   
   console.log(`Found ${allTabs.length} tabs in ${Object.keys(windowTabs).length} windows`);
   
-  // Group each window separately (Chrome groups must be in same window)
   for (const [windowId, tabs] of Object.entries(windowTabs)) {
     console.log(`Processing window ${windowId} with ${tabs.length} tabs`);
-    
-    // First ungroup tabs in this window
     await ungroupTabs(tabs);
-    
     const groups = await analyzeAndGroup(tabs);
     await createGroups(groups);
   }
 }
+
+// ==================== Timeline Grouping ====================
+
+async function groupByTimeline(targetWindowId) {
+  console.log('Grouping by timeline...', targetWindowId ? `window ${targetWindowId}` : 'all windows');
+  
+  const settings = await getSettings();
+  const timeThresholdMs = (settings.timelineThreshold || 5) * 60 * 1000; // Default 5 minutes
+  
+  // Get tabs to group
+  let tabs;
+  if (targetWindowId) {
+    tabs = await chrome.tabs.query({ windowId: targetWindowId });
+  } else {
+    tabs = await chrome.tabs.query({});
+  }
+  
+  // Filter valid tabs and enrich with timeline data
+  const validTabs = tabs.filter(tab => 
+    tab.url && 
+    !tab.url.startsWith('chrome://') && 
+    !tab.url.startsWith('chrome-extension://')
+  );
+  
+  // Sort by creation time (tabs with timeline data first)
+  const tabsWithTime = validTabs.map(tab => {
+    const timelineEntry = tabTimeline.get(tab.id);
+    return {
+      ...tab,
+      createdAt: timelineEntry?.createdAt || Date.now() - (tab.index * 60000) // Fallback: estimate from index
+    };
+  }).sort((a, b) => a.createdAt - b.createdAt);
+  
+  if (tabsWithTime.length === 0) {
+    console.log('No valid tabs to group');
+    return;
+  }
+  
+  // Group by time windows
+  const timeGroups = [];
+  let currentGroup = [tabsWithTime[0]];
+  let groupStartTime = tabsWithTime[0].createdAt;
+  
+  for (let i = 1; i < tabsWithTime.length; i++) {
+    const tab = tabsWithTime[i];
+    const timeDiff = tab.createdAt - tabsWithTime[i - 1].createdAt;
+    
+    if (timeDiff <= timeThresholdMs) {
+      // Same time window
+      currentGroup.push(tab);
+    } else {
+      // New time window
+      if (currentGroup.length >= 1) {
+        timeGroups.push({
+          tabs: currentGroup,
+          startTime: groupStartTime,
+          endTime: tabsWithTime[i - 1].createdAt
+        });
+      }
+      currentGroup = [tab];
+      groupStartTime = tab.createdAt;
+    }
+  }
+  
+  // Don't forget the last group
+  if (currentGroup.length >= 1) {
+    timeGroups.push({
+      tabs: currentGroup,
+      startTime: groupStartTime,
+      endTime: currentGroup[currentGroup.length - 1].createdAt
+    });
+  }
+  
+  console.log(`Created ${timeGroups.length} time groups`);
+  
+  // Ungroup all first
+  await ungroupTabs(tabs);
+  
+  // Create Chrome tab groups
+  for (const group of timeGroups) {
+    if (group.tabs.length >= 2) {
+      const tabIds = group.tabs.map(t => t.id);
+      const title = formatTimeRange(group.startTime, group.endTime);
+      
+      try {
+        const groupId = await chrome.tabs.group({ tabIds });
+        await chrome.tabGroups.update(groupId, {
+          title: title,
+          color: getGroupColor(title)
+        });
+        console.log(`Created timeline group: ${title} with ${tabIds.length} tabs`);
+      } catch (error) {
+        console.error(`Failed to create timeline group: ${error.message}`);
+      }
+    }
+  }
+}
+
+function formatTimeRange(startTime, endTime) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    });
+  };
+  
+  return `${formatTime(start)}-${formatTime(end)}`;
+}
+
+// ==================== Helpers ====================
 
 async function ungroupTabs(tabs) {
   for (const tab of tabs) {
@@ -122,7 +265,6 @@ async function ungroupAll() {
 async function autoGroupTab(tab) {
   if (!tab.id || !tab.url) return;
   
-  // Skip chrome:// and extension pages
   if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
     return;
   }
@@ -131,16 +273,13 @@ async function autoGroupTab(tab) {
     const settings = await getSettings();
     const groupKey = await getGroupKey(tab, settings);
     
-    // Find existing group with same key in same window
     const existingGroups = await chrome.tabGroups.query({ windowId: tab.windowId });
     const matchingGroup = existingGroups.find(g => g.title === groupKey || g.title?.includes(groupKey));
     
     if (matchingGroup) {
-      // Add to existing group
       await chrome.tabs.group({ tabIds: tab.id, groupId: matchingGroup.id });
       console.log(`Added tab to existing group: ${groupKey}`);
     } else {
-      // Check if there are other tabs with same key to create a new group
       const otherTabs = await chrome.tabs.query({ windowId: tab.windowId });
       const similarTabs = [];
       
@@ -154,7 +293,6 @@ async function autoGroupTab(tab) {
       }
       
       if (similarTabs.length > 0) {
-        // Create new group with similar tabs
         const allTabIds = [tab.id, ...similarTabs];
         const groupId = await chrome.tabs.group({ tabIds: allTabIds });
         await chrome.tabGroups.update(groupId, {
@@ -240,7 +378,6 @@ function isCodeHostingSite(domain) {
 }
 
 function isDocsSite(domain) {
-  // Exact match or subdomain match
   const docsSites = [
     'docs.google.com',
     'notion.so',
@@ -256,12 +393,11 @@ function isDocsSite(domain) {
   return docsSites.some(d => domain === d || domain.endsWith('.' + d));
 }
 
-// ==================== Helpers ====================
+// ==================== Color Helpers ====================
 
 const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 
 function getGroupColor(groupKey) {
-  // Generate consistent color based on group key
   let hash = 0;
   for (let i = 0; i < groupKey.length; i++) {
     hash = groupKey.charCodeAt(i) + ((hash << 5) - hash);
@@ -274,11 +410,14 @@ function truncateTitle(title, maxLength) {
   return title.substring(0, maxLength - 2) + '..';
 }
 
+// ==================== Settings ====================
+
 async function getSettings() {
   const result = await chrome.storage.sync.get({
     useUrlHierarchy: true,
     useContentAnalysis: false,
     autoGroup: false,
+    timelineThreshold: 5, // minutes
     llmEnabled: false,
     llmApiKey: '',
     llmApiUrl: 'https://api.openai.com/v1/chat/completions',

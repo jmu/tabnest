@@ -1,6 +1,6 @@
 # TabNest
 
-智能 Chrome 标签页分组扩展 - 基于 URL 层级结构和内容理解。
+智能 Chrome 标签页分组扩展 - 基于 URL 层级结构、时间线和内容理解。
 
 ## 功能概述
 
@@ -8,8 +8,9 @@
 
 | 功能 | 说明 |
 |------|------|
-| **Group All Tabs** | 将所有浏览器窗口中的标签页按规则分组 |
+| **Group All Tabs** | 将所有浏览器窗口中的标签页按 URL 规则分组 |
 | **Group Current Window** | 仅对当前窗口的标签页进行分组 |
+| **Group by Timeline** | 按标签页打开时间顺序分组 |
 | **Ungroup All** | 解散所有标签页分组 |
 | **Auto-group** | 新标签页自动加入匹配的现有分组 |
 
@@ -30,7 +31,20 @@
 **普通站点**
 - 默认按域名分组，如 `google.com`、`stackoverflow.com`
 
-#### 2. 自动分组
+#### 2. 时间线分组 (Timeline Grouping)
+
+按标签页打开时间分组，捕捉用户的浏览轨迹：
+
+- 记录每个标签页的创建时间
+- 相邻标签页时间差 < 阈值（默认 5 分钟）则归为同一组
+- 组名显示为时间范围，如 `14:00-14:25`
+
+**适用场景：**
+- 研究某个主题时连续打开的多个标签页
+- 工作时间段的浏览记录
+- 按会话回顾浏览历史
+
+#### 3. 自动分组
 
 启用后，新打开的标签页会：
 1. 分析 URL 确定分组 key
@@ -90,6 +104,7 @@ tabnest/
 |------|------|
 | `groupCurrentWindow()` | 分组当前窗口所有标签页 |
 | `groupAllWindows()` | 分组所有窗口的标签页 |
+| `groupByTimeline(windowId)` | 按时间线分组标签页 |
 | `analyzeAndGroup(tabs)` | 分析标签页并返回分组映射 |
 | `getGroupKey(tab, settings)` | 根据策略计算标签页的分组 key |
 | `autoGroupTab(tab)` | 自动将新标签页加入合适分组 |
@@ -97,6 +112,7 @@ tabnest/
 | `isCodeHostingSite(domain)` | 判断是否为代码托管站点 |
 | `isDocsSite(domain)` | 判断是否为文档站点 |
 | `getGroupColor(groupKey)` | 根据分组 key 生成一致的颜色 |
+| `formatTimeRange(start, end)` | 格式化时间范围为分组标题 |
 
 ### 分组流程
 
@@ -185,6 +201,7 @@ getGroupKey(tab, settings)
 | `useUrlHierarchy` | `true` | 启用 URL 层级分组策略 |
 | `useContentAnalysis` | `false` | 内容分析（实验性，暂未实现） |
 | `autoGroup` | `false` | 新标签页自动分组 |
+| `timelineThreshold` | `5` | 时间线分组阈值（分钟），相邻标签页时间差小于此值则归为同一组 |
 | `llmEnabled` | `false` | 启用 AI 辅助分组（实验性） |
 | `llmApiKey` | `''` | OpenAI API Key |
 | `llmApiUrl` | `https://api.openai.com/v1/chat/completions` | LLM API 端点 |
