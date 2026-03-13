@@ -150,20 +150,26 @@ async function groupByTimeline(targetWindowId) {
     return;
   }
   
-  // Group by time windows
+  // Group by time windows, respecting date boundaries
   const timeGroups = [];
   let currentGroup = [tabsWithTime[0]];
   let groupStartTime = tabsWithTime[0].createdAt;
   
   for (let i = 1; i < tabsWithTime.length; i++) {
     const tab = tabsWithTime[i];
-    const timeDiff = tab.createdAt - tabsWithTime[i - 1].createdAt;
+    const prevTab = tabsWithTime[i - 1];
+    const timeDiff = tab.createdAt - prevTab.createdAt;
     
-    if (timeDiff <= timeThresholdMs) {
-      // Same time window
+    // Check if they are on different days
+    const prevDate = new Date(prevTab.createdAt).toDateString();
+    const currDate = new Date(tab.createdAt).toDateString();
+    const isDifferentDay = prevDate !== currDate;
+    
+    if (timeDiff <= timeThresholdMs && !isDifferentDay) {
+      // Same time window and same day
       currentGroup.push(tab);
     } else {
-      // New time window
+      // New time window (time gap or different day)
       if (currentGroup.length >= 1) {
         timeGroups.push({
           tabs: currentGroup,
