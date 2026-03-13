@@ -136,7 +136,7 @@ async function groupByTimeline(targetWindowId) {
     !tab.url.startsWith('chrome-extension://')
   );
   
-  // Sort by creation time (tabs with timeline data first)
+  // Sort by creation time (earliest first)
   const tabsWithTime = validTabs.map(tab => {
     const timelineEntry = tabTimeline.get(tab.id);
     return {
@@ -190,10 +190,16 @@ async function groupByTimeline(targetWindowId) {
   // Ungroup all first
   await ungroupTabs(tabs);
   
+  // Sort groups: later time groups go to the right
+  // Process in reverse order so later groups end up on the right
+  const sortedGroups = [...timeGroups].reverse();
+  
   // Create Chrome tab groups
-  for (const group of timeGroups) {
+  for (const group of sortedGroups) {
     if (group.tabs.length >= 2) {
-      const tabIds = group.tabs.map(t => t.id);
+      // Sort tabs within group: later tabs go to the right
+      const sortedTabs = [...group.tabs].sort((a, b) => a.createdAt - b.createdAt);
+      const tabIds = sortedTabs.map(t => t.id);
       const title = formatTimeRange(group.startTime, group.endTime);
       
       try {
@@ -213,16 +219,30 @@ async function groupByTimeline(targetWindowId) {
 function formatTimeRange(startTime, endTime) {
   const start = new Date(startTime);
   const end = new Date(endTime);
+  const now = new Date();
   
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  };
+  // Check if it's today
+  const isToday = start.toDateString() === now.toDateString();
   
-  return `${formatTime(start)}-${formatTime(end)}`;
+  if (isToday) {
+    // Today: show time range like "09:00-09:05"
+    const formatTime = (date) => {
+      return date.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      });
+    };
+    return `${formatTime(start)}-${formatTime(end)}`;
+  } else {
+    // Not today: show date like "3/12"
+    const formatDate = (date) => {
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      return `${month}/${day}`;
+    };
+    return formatDate(start);
+  }
 }
 
 // ==================== Helpers ====================
