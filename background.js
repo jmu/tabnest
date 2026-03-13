@@ -1,7 +1,43 @@
 // background.js - Service worker
 
-// Timeline tracking: store tab creation times
+// Timeline tracking: store tab creation times (persisted to storage)
 const tabTimeline = new Map(); // tabId -> { createdAt, url, windowId, title }
+let timelineLoaded = false;
+
+// Load timeline data from storage on startup
+async function loadTimelineFromStorage() {
+  if (timelineLoaded) return;
+  
+  try {
+    const result = await chrome.storage.local.get('tabTimeline');
+    if (result.tabTimeline) {
+      const entries = Object.entries(result.tabTimeline);
+      for (const [tabId, data] of entries) {
+        tabTimeline.set(parseInt(tabId), data);
+      }
+      console.log(`Loaded ${tabTimeline.size} timeline entries from storage`);
+    }
+  } catch (error) {
+    console.error('Failed to load timeline from storage:', error);
+  }
+  timelineLoaded = true;
+}
+
+// Save timeline data to storage
+async function saveTimelineToStorage() {
+  try {
+    const obj = {};
+    for (const [tabId, data] of tabTimeline) {
+      obj[tabId] = data;
+    }
+    await chrome.storage.local.set({ tabTimeline: obj });
+  } catch (error) {
+    console.error('Failed to save timeline to storage:', error);
+  }
+}
+
+// Initialize on startup
+loadTimelineFromStorage();
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -9,6 +45,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   (async () => {
     try {
+      await loadTimelineFromStorage(); // Ensure loaded
+      
       if (message.action === 'groupAll') {
         await groupAllWindows();
         sendResponse({ success: true });
@@ -21,6 +59,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else if (message.action === 'ungroupAll') {
         await ungroupAll();
         sendResponse({ success: true });
+      } else if (message.action === 'debugTimeline') {
+        // Debug: return timeline data
+        const data = {};
+        for (const [tabId, entry] of tabTimeline) {
+          data[tabId] = {
+            ...entry,
+            dateStr: new Date(entry.createdAt).toLocaleString()
+          };
+        }
+        sendResponse({ success: true, timeline: data, count: tabTimeline.size });
       } else {
         sendResponse({ success: false, error: 'Unknown action' });
       }
@@ -39,13 +87,15 @@ let pendingAutoGroup = null;
 // Track tab creation for timeline grouping
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id && tab.windowId) {
-    tabTimeline.set(tab.id, {
+    const entry = {
       createdAt: Date.now(),
       url: tab.url || tab.pendingUrl || '',
       windowId: tab.windowId,
       title: tab.title || ''
-    });
-    console.log(`Tab ${tab.id} created at ${new Date().toLocaleTimeString()}`);
+    };
+    tabTimeline.set(tab.id, entry);
+    saveTimelineToStorage(); // Persist
+    console.log(`Tab ${tab.id} created at ${new Date(entry.createdAt).toLocaleString()}`);
   }
 });
 
@@ -55,12 +105,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url && tabTimeline.has(tabId)) {
     const entry = tabTimeline.get(tabId);
     entry.url = changeInfo.url;
+    saveTimelineToStorage();
   }
   
   // Update title
   if (changeInfo.title && tabTimeline.has(tabId)) {
     const entry = tabTimeline.get(tabId);
     entry.title = changeInfo.title;
+    saveTimelineToStorage();
   }
   
   // Auto-group when tab is loaded
@@ -75,7 +127,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // Clean up timeline when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
-  tabTimeline.delete(tabId);
+  if (tabTimeline.has(tabId)) {
+    tabTimeline.delete(tabId);
+    saveTimelineToStorage(); // Persist removal
+    console.log(`Tab ${tabId} removed from timeline`);
+  }
 });
 
 // ==================== Core Grouping Logic ====================
@@ -118,6 +174,8 @@ async function groupAllWindows() {
 async function groupByTimeline(targetWindowId) {
   console.log('Grouping by timeline...', targetWindowId ? `window ${targetWindowId}` : 'all windows');
   
+  await loadTimelineFromStorage(); // Ensure timeline is loaded
+  
   const settings = await getSettings();
   const timeThresholdMs = (settings.timelineThreshold || 5) * 60 * 1000; // Default 5 minutes
   
@@ -130,75 +188,103 @@ async function groupByTimeline(targetWindowId) {
   }
   
   // Filter valid tabs and enrich with timeline data
-  const validTabs = tabs.filter(tab => 
-    tab.url && 
-    !tab.url.startsWith('chrome://') && 
-    !tab.url.startsWith('chrome-extension://')
-  );
+  const validTabs = [];
+  const tabsWithoutTime = [];
   
-  // Sort by creation time (earliest first)
-  const tabsWithTime = validTabs.map(tab => {
+  for (const tab of tabs) {
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+      continue;
+    }
+    
     const timelineEntry = tabTimeline.get(tab.id);
-    return {
-      ...tab,
-      createdAt: timelineEntry?.createdAt || Date.now() - (tab.index * 60000) // Fallback: estimate from index
-    };
-  }).sort((a, b) => a.createdAt - b.createdAt);
-  
-  if (tabsWithTime.length === 0) {
-    console.log('No valid tabs to group');
-    return;
-  }
-  
-  // Group by time windows, respecting date boundaries
-  const timeGroups = [];
-  let currentGroup = [tabsWithTime[0]];
-  let groupStartTime = tabsWithTime[0].createdAt;
-  
-  for (let i = 1; i < tabsWithTime.length; i++) {
-    const tab = tabsWithTime[i];
-    const prevTab = tabsWithTime[i - 1];
-    const timeDiff = tab.createdAt - prevTab.createdAt;
-    
-    // Check if they are on different days
-    const prevDate = new Date(prevTab.createdAt).toDateString();
-    const currDate = new Date(tab.createdAt).toDateString();
-    const isDifferentDay = prevDate !== currDate;
-    
-    if (timeDiff <= timeThresholdMs && !isDifferentDay) {
-      // Same time window and same day
-      currentGroup.push(tab);
+    if (timelineEntry && timelineEntry.createdAt) {
+      validTabs.push({
+        ...tab,
+        createdAt: timelineEntry.createdAt
+      });
     } else {
-      // New time window (time gap or different day)
-      if (currentGroup.length >= 1) {
-        timeGroups.push({
-          tabs: currentGroup,
-          startTime: groupStartTime,
-          endTime: tabsWithTime[i - 1].createdAt
-        });
-      }
-      currentGroup = [tab];
-      groupStartTime = tab.createdAt;
+      tabsWithoutTime.push(tab);
     }
   }
   
-  // Don't forget the last group
-  if (currentGroup.length >= 1) {
-    timeGroups.push({
-      tabs: currentGroup,
-      startTime: groupStartTime,
-      endTime: currentGroup[currentGroup.length - 1].createdAt
-    });
+  console.log(`Tabs with timeline data: ${validTabs.length}, without: ${tabsWithoutTime.length}`);
+  
+  // Debug: log timeline data
+  for (const tab of validTabs) {
+    console.log(`Tab ${tab.id}: ${new Date(tab.createdAt).toLocaleString()}`);
   }
   
-  console.log(`Created ${timeGroups.length} time groups`);
+  if (validTabs.length === 0) {
+    console.log('No tabs with timeline data found. Timeline data may have been cleared.');
+    return;
+  }
+  
+  // Sort by creation time (earliest first)
+  validTabs.sort((a, b) => a.createdAt - b.createdAt);
+  
+  // Group by date first, then by time within each date
+  const dateGroups = new Map(); // date string -> array of tabs
+  
+  for (const tab of validTabs) {
+    const dateKey = new Date(tab.createdAt).toDateString();
+    if (!dateGroups.has(dateKey)) {
+      dateGroups.set(dateKey, []);
+    }
+    dateGroups.get(dateKey).push(tab);
+  }
+  
+  console.log(`Found ${dateGroups.size} different dates`);
+  
+  // Now group within each date by time threshold
+  const timeGroups = [];
+  
+  for (const [dateKey, dateTabs] of dateGroups) {
+    // Sort tabs within this date by time
+    dateTabs.sort((a, b) => a.createdAt - b.createdAt);
+    
+    let currentGroup = [dateTabs[0]];
+    let groupStartTime = dateTabs[0].createdAt;
+    
+    for (let i = 1; i < dateTabs.length; i++) {
+      const tab = dateTabs[i];
+      const prevTab = dateTabs[i - 1];
+      const timeDiff = tab.createdAt - prevTab.createdAt;
+      
+      if (timeDiff <= timeThresholdMs) {
+        // Same time window
+        currentGroup.push(tab);
+      } else {
+        // New time window
+        if (currentGroup.length >= 1) {
+          timeGroups.push({
+            tabs: currentGroup,
+            startTime: groupStartTime,
+            endTime: dateTabs[i - 1].createdAt
+          });
+        }
+        currentGroup = [tab];
+        groupStartTime = tab.createdAt;
+      }
+    }
+    
+    // Don't forget the last group for this date
+    if (currentGroup.length >= 1) {
+      timeGroups.push({
+        tabs: currentGroup,
+        startTime: groupStartTime,
+        endTime: currentGroup[currentGroup.length - 1].createdAt
+      });
+    }
+  }
+  
+  console.log(`Created ${timeGroups.length} time groups across ${dateGroups.size} dates`);
   
   // Ungroup all first
   await ungroupTabs(tabs);
   
   // Sort groups: later time groups go to the right
   // Process in reverse order so later groups end up on the right
-  const sortedGroups = [...timeGroups].reverse();
+  const sortedGroups = [...timeGroups].sort((a, b) => b.startTime - a.startTime);
   
   // Create Chrome tab groups
   for (const group of sortedGroups) {
