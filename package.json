@@ -1,0 +1,23 @@
+{
+  "name": "tabnest",
+  "version": "1.0.0",
+  "description": "智能 Chrome 标签页分组扩展 - 基于 URL 层级结构、时间线和内容理解。",
+  "main": "background.js",
+  "scripts": {
+    "test": "jest --verbose"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmu/tabnest.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jmu/tabnest/issues"
+  },
+  "homepage": "https://github.com/jmu/tabnest#readme",
+  "devDependencies": {
+    "jest": "^30.3.0"
+  }
+}

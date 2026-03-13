@@ -3,7 +3,9 @@ node_modules/
 
 # Build output
 dist/
-*.zip
+
+# Release packages (keep for distribution)
+# *.zip
 
 # OS files
 .DS_Store
