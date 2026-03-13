@@ -1,6 +1,6 @@
 {
   "name": "tabnest",
-  "version": "1.0.0",
+  "version": "1.0.8",
   "description": "智能 Chrome 标签页分组扩展 - 基于 URL 层级结构、时间线和内容理解。",
   "main": "background.js",
   "scripts": {

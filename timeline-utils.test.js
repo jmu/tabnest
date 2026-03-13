@@ -38,6 +38,19 @@ describe('formatTimeRange', () => {
     const result = formatTimeRange(startTime, endTime, now);
     expect(result).toBe('2/28');
   });
+  
+  test('should use default now parameter (Date.now())', () => {
+    // Test without passing now parameter - uses Date.now() as default
+    const today = new Date();
+    const startTime = new Date(today);
+    startTime.setHours(9, 0, 0, 0);
+    const endTime = new Date(today);
+    endTime.setHours(9, 5, 0, 0);
+    
+    const result = formatTimeRange(startTime.getTime(), endTime.getTime());
+    // Should show time range since it's today
+    expect(result).toMatch(/^\d{2}:\d{2}-\d{2}:\d{2}$/);
+  });
 });
 
 describe('groupByTimeline', () => {
@@ -199,6 +212,19 @@ describe('groupByTimeline', () => {
     expect(result.length).toBe(2);
     expect(result[0].tabs.map(t => t.id)).toEqual([1, 2]);
     expect(result[1].tabs.map(t => t.id)).toEqual([3]);
+  });
+  
+  test('should use default time threshold (5 minutes)', () => {
+    // Test without passing timeThresholdMs - uses 5 min as default
+    const tabs = [
+      { id: 1, createdAt: t('2026-03-13T09:00:00') },
+      { id: 2, createdAt: t('2026-03-13T09:03:00') }, // 3 min gap < 5 min
+    ];
+    
+    const result = groupByTimeline(tabs); // No threshold passed
+    
+    expect(result.length).toBe(1);
+    expect(result[0].tabs.length).toBe(2);
   });
 });
 
