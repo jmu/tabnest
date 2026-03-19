@@ -39,6 +39,36 @@ async function saveTimelineToStorage() {
 // Initialize on startup
 loadTimelineFromStorage();
 
+// Initialize timeline data for existing tabs that don't have it
+async function initializeExistingTabs() {
+  await loadTimelineFromStorage();
+  
+  const tabs = await chrome.tabs.query({});
+  let addedCount = 0;
+  
+  for (const tab of tabs) {
+    if (tab.id && !tabTimeline.has(tab.id)) {
+      // Use current time as fallback for existing tabs
+      const entry = {
+        createdAt: Date.now(),
+        url: tab.url || '',
+        windowId: tab.windowId,
+        title: tab.title || ''
+      };
+      tabTimeline.set(tab.id, entry);
+      addedCount++;
+    }
+  }
+  
+  if (addedCount > 0) {
+    await saveTimelineToStorage();
+    console.log(`Initialized timeline for ${addedCount} existing tabs`);
+  }
+}
+
+// Run initialization when service worker starts
+initializeExistingTabs();
+
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Received message:', message.action);
@@ -215,8 +245,27 @@ async function groupByTimeline(targetWindowId) {
   }
   
   if (validTabs.length === 0) {
-    console.log('No tabs with timeline data found. Timeline data may have been cleared.');
-    return;
+    console.log('No tabs with timeline data found. Initializing existing tabs...');
+    // Try to initialize existing tabs
+    await initializeExistingTabs();
+    // Retry with updated data
+    for (const tab of tabs) {
+      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+        continue;
+      }
+      const timelineEntry = tabTimeline.get(tab.id);
+      if (timelineEntry && timelineEntry.createdAt) {
+        validTabs.push({
+          ...tab,
+          createdAt: timelineEntry.createdAt
+        });
+      }
+    }
+    
+    if (validTabs.length === 0) {
+      console.log('Still no tabs available for timeline grouping');
+      return;
+    }
   }
   
   // Sort by creation time (earliest first)
