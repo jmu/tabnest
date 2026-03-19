@@ -1,6 +1,6 @@
 // background.js - Service worker
 
-// Timeline tracking: store tab creation times (persisted to storage)
+// Timeline tracking: store tab creation times (for tabs that haven't been activated yet)
 const tabTimeline = new Map(); // tabId -> { createdAt, url, windowId, title }
 let timelineLoaded = false;
 
@@ -39,35 +39,23 @@ async function saveTimelineToStorage() {
 // Initialize on startup
 loadTimelineFromStorage();
 
-// Initialize timeline data for existing tabs that don't have it
-async function initializeExistingTabs() {
-  await loadTimelineFromStorage();
-  
-  const tabs = await chrome.tabs.query({});
-  let addedCount = 0;
-  
-  for (const tab of tabs) {
-    if (tab.id && !tabTimeline.has(tab.id)) {
-      // Use current time as fallback for existing tabs
-      const entry = {
-        createdAt: Date.now(),
-        url: tab.url || '',
-        windowId: tab.windowId,
-        title: tab.title || ''
-      };
-      tabTimeline.set(tab.id, entry);
-      addedCount++;
-    }
+// Get tab creation time using native API (Chrome 121+) or fallback
+function getTabCreatedAt(tab) {
+  // Chrome 121+ provides lastAccessed (last time tab became active)
+  // For a newly created tab that was immediately active, this ≈ creation time
+  if (tab.lastAccessed && tab.lastAccessed > 0) {
+    return tab.lastAccessed;
   }
   
-  if (addedCount > 0) {
-    await saveTimelineToStorage();
-    console.log(`Initialized timeline for ${addedCount} existing tabs`);
+  // Fallback: check our manual tracking
+  const entry = tabTimeline.get(tab.id);
+  if (entry && entry.createdAt) {
+    return entry.createdAt;
   }
+  
+  // Last resort: use current time
+  return Date.now();
 }
-
-// Run initialization when service worker starts
-initializeExistingTabs();
 
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -75,7 +63,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   (async () => {
     try {
-      await loadTimelineFromStorage(); // Ensure loaded
+      await loadTimelineFromStorage();
       
       if (message.action === 'groupAll') {
         await groupAllWindows();
@@ -90,15 +78,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await ungroupAll();
         sendResponse({ success: true });
       } else if (message.action === 'debugTimeline') {
-        // Debug: return timeline data
-        const data = {};
-        for (const [tabId, entry] of tabTimeline) {
-          data[tabId] = {
-            ...entry,
-            dateStr: new Date(entry.createdAt).toLocaleString()
-          };
-        }
-        sendResponse({ success: true, timeline: data, count: tabTimeline.size });
+        const tabs = await chrome.tabs.query({});
+        const data = tabs.map(t => ({
+          id: t.id,
+          url: t.url,
+          lastAccessed: t.lastAccessed,
+          lastAccessedStr: t.lastAccessed ? new Date(t.lastAccessed).toLocaleString() : 'N/A',
+          tracked: tabTimeline.get(t.id)?.createdAt
+        }));
+        sendResponse({ success: true, tabs: data, tracked: tabTimeline.size });
       } else {
         sendResponse({ success: false, error: 'Unknown action' });
       }
@@ -108,28 +96,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   })();
   
-  return true; // Keep message channel open for async response
+  return true;
 });
 
 // Track pending auto-group to avoid duplicates
 let pendingAutoGroup = null;
 
-// Track tab creation for timeline grouping
+// Track tab creation for timeline grouping (fallback for tabs never activated)
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id && tab.windowId) {
-    const entry = {
-      createdAt: Date.now(),
-      url: tab.url || tab.pendingUrl || '',
-      windowId: tab.windowId,
-      title: tab.title || ''
-    };
-    tabTimeline.set(tab.id, entry);
-    saveTimelineToStorage(); // Persist
-    console.log(`Tab ${tab.id} created at ${new Date(entry.createdAt).toLocaleString()}`);
+    // Only track if not already tracked (lastAccessed might be set)
+    if (!tabTimeline.has(tab.id)) {
+      const entry = {
+        createdAt: Date.now(),
+        url: tab.url || tab.pendingUrl || '',
+        windowId: tab.windowId,
+        title: tab.title || ''
+      };
+      tabTimeline.set(tab.id, entry);
+      saveTimelineToStorage();
+      console.log(`Tab ${tab.id} created at ${new Date(entry.createdAt).toLocaleString()}`);
+    }
   }
 });
 
-// Update timeline when tab URL changes and handle auto-group
+// Update timeline when tab URL changes
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Update URL in timeline
   if (changeInfo.url && tabTimeline.has(tabId)) {
@@ -159,7 +150,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabTimeline.has(tabId)) {
     tabTimeline.delete(tabId);
-    saveTimelineToStorage(); // Persist removal
+    saveTimelineToStorage();
     console.log(`Tab ${tabId} removed from timeline`);
   }
 });
@@ -204,8 +195,6 @@ async function groupAllWindows() {
 async function groupByTimeline(targetWindowId) {
   console.log('Grouping by timeline...', targetWindowId ? `window ${targetWindowId}` : 'all windows');
   
-  await loadTimelineFromStorage(); // Ensure timeline is loaded
-  
   const settings = await getSettings();
   const timeThresholdMs = (settings.timelineThreshold || 5) * 60 * 1000; // Default 5 minutes
   
@@ -217,62 +206,35 @@ async function groupByTimeline(targetWindowId) {
     tabs = await chrome.tabs.query({});
   }
   
-  // Filter valid tabs and enrich with timeline data
+  // Filter valid tabs and get creation time using native API
   const validTabs = [];
-  const tabsWithoutTime = [];
   
   for (const tab of tabs) {
     if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
       continue;
     }
     
-    const timelineEntry = tabTimeline.get(tab.id);
-    if (timelineEntry && timelineEntry.createdAt) {
-      validTabs.push({
-        ...tab,
-        createdAt: timelineEntry.createdAt
-      });
-    } else {
-      tabsWithoutTime.push(tab);
-    }
+    const createdAt = getTabCreatedAt(tab);
+    validTabs.push({
+      ...tab,
+      createdAt: createdAt
+    });
+    
+    console.log(`Tab ${tab.id}: lastAccessed=${tab.lastAccessed}, createdAt=${new Date(createdAt).toLocaleString()}`);
   }
   
-  console.log(`Tabs with timeline data: ${validTabs.length}, without: ${tabsWithoutTime.length}`);
-  
-  // Debug: log timeline data
-  for (const tab of validTabs) {
-    console.log(`Tab ${tab.id}: ${new Date(tab.createdAt).toLocaleString()}`);
-  }
+  console.log(`Found ${validTabs.length} valid tabs for timeline grouping`);
   
   if (validTabs.length === 0) {
-    console.log('No tabs with timeline data found. Initializing existing tabs...');
-    // Try to initialize existing tabs
-    await initializeExistingTabs();
-    // Retry with updated data
-    for (const tab of tabs) {
-      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-        continue;
-      }
-      const timelineEntry = tabTimeline.get(tab.id);
-      if (timelineEntry && timelineEntry.createdAt) {
-        validTabs.push({
-          ...tab,
-          createdAt: timelineEntry.createdAt
-        });
-      }
-    }
-    
-    if (validTabs.length === 0) {
-      console.log('Still no tabs available for timeline grouping');
-      return;
-    }
+    console.log('No valid tabs available for timeline grouping');
+    return;
   }
   
   // Sort by creation time (earliest first)
   validTabs.sort((a, b) => a.createdAt - b.createdAt);
   
   // Group by date first, then by time within each date
-  const dateGroups = new Map(); // date string -> array of tabs
+  const dateGroups = new Map();
   
   for (const tab of validTabs) {
     const dateKey = new Date(tab.createdAt).toDateString();
@@ -284,11 +246,10 @@ async function groupByTimeline(targetWindowId) {
   
   console.log(`Found ${dateGroups.size} different dates`);
   
-  // Now group within each date by time threshold
+  // Group within each date by time threshold
   const timeGroups = [];
   
   for (const [dateKey, dateTabs] of dateGroups) {
-    // Sort tabs within this date by time
     dateTabs.sort((a, b) => a.createdAt - b.createdAt);
     
     let currentGroup = [dateTabs[0]];
@@ -300,10 +261,8 @@ async function groupByTimeline(targetWindowId) {
       const timeDiff = tab.createdAt - prevTab.createdAt;
       
       if (timeDiff <= timeThresholdMs) {
-        // Same time window
         currentGroup.push(tab);
       } else {
-        // New time window
         if (currentGroup.length >= 1) {
           timeGroups.push({
             tabs: currentGroup,
@@ -316,7 +275,6 @@ async function groupByTimeline(targetWindowId) {
       }
     }
     
-    // Don't forget the last group for this date
     if (currentGroup.length >= 1) {
       timeGroups.push({
         tabs: currentGroup,
@@ -331,14 +289,11 @@ async function groupByTimeline(targetWindowId) {
   // Ungroup all first
   await ungroupTabs(tabs);
   
-  // Sort groups: later time groups go to the right
-  // Process in reverse order so later groups end up on the right
+  // Create Chrome tab groups (process in reverse order so later groups end up on the right)
   const sortedGroups = [...timeGroups].sort((a, b) => b.startTime - a.startTime);
   
-  // Create Chrome tab groups
   for (const group of sortedGroups) {
     if (group.tabs.length >= 2) {
-      // Sort tabs within group: later tabs go to the right
       const sortedTabs = [...group.tabs].sort((a, b) => a.createdAt - b.createdAt);
       const tabIds = sortedTabs.map(t => t.id);
       const title = formatTimeRange(group.startTime, group.endTime);
@@ -362,11 +317,9 @@ function formatTimeRange(startTime, endTime) {
   const end = new Date(endTime);
   const now = new Date();
   
-  // Check if it's today
   const isToday = start.toDateString() === now.toDateString();
   
   if (isToday) {
-    // Today: show time range like "09:00-09:05"
     const formatTime = (date) => {
       return date.toLocaleTimeString('en-US', { 
         hour: '2-digit', 
@@ -376,13 +329,9 @@ function formatTimeRange(startTime, endTime) {
     };
     return `${formatTime(start)}-${formatTime(end)}`;
   } else {
-    // Not today: show date like "3/12"
-    const formatDate = (date) => {
-      const month = date.getMonth() + 1;
-      const day = date.getDate();
-      return `${month}/${day}`;
-    };
-    return formatDate(start);
+    const month = start.getMonth() + 1;
+    const day = start.getDate();
+    return `${month}/${day}`;
   }
 }
 
@@ -493,21 +442,17 @@ async function analyzeAndGroup(tabs) {
 async function getGroupKey(tab, settings) {
   const urlInfo = parseUrl(tab.url);
   
-  // Strategy 1: Domain + Path Level (e.g., github.com/owner/repo)
   if (settings.useUrlHierarchy && urlInfo.pathSegments.length > 1) {
-    // For GitHub, GitLab, etc. - group by owner/repo
     if (isCodeHostingSite(urlInfo.domain)) {
       const projectPath = urlInfo.pathSegments.slice(0, 2).join('/');
       return `${urlInfo.domain}/${projectPath}`;
     }
     
-    // For docs sites - group by first path segment
     if (isDocsSite(urlInfo.domain)) {
       return `${urlInfo.domain}/${urlInfo.pathSegments[0]}`;
     }
   }
   
-  // Strategy 2: Domain only
   return urlInfo.domain;
 }
 
@@ -578,7 +523,7 @@ async function getSettings() {
     useUrlHierarchy: true,
     useContentAnalysis: false,
     autoGroup: false,
-    timelineThreshold: 5, // minutes
+    timelineThreshold: 5,
     llmEnabled: false,
     llmApiKey: '',
     llmApiUrl: 'https://api.openai.com/v1/chat/completions',
