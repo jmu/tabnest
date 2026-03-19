@@ -1,5 +1,7 @@
 // background.js - Service worker
 
+import { formatTimeRange, groupByTimeline, getGroupColor } from './timeline-utils.js';
+
 // Timeline tracking: store tab creation times (for tabs that haven't been activated yet)
 const tabTimeline = new Map(); // tabId -> { createdAt, url, windowId, title }
 let timelineLoaded = false;
@@ -72,7 +74,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await groupCurrentWindow();
         sendResponse({ success: true });
       } else if (message.action === 'groupTimeline') {
-        await groupByTimeline(message.windowId === 'all' ? null : message.windowId);
+        await groupByTimelineAction(message.windowId === 'all' ? null : message.windowId);
         sendResponse({ success: true });
       } else if (message.action === 'ungroupAll') {
         await ungroupAll();
@@ -192,7 +194,7 @@ async function groupAllWindows() {
 
 // ==================== Timeline Grouping ====================
 
-async function groupByTimeline(targetWindowId) {
+async function groupByTimelineAction(targetWindowId) {
   console.log('Grouping by timeline...', targetWindowId ? `window ${targetWindowId}` : 'all windows');
   
   const settings = await getSettings();
@@ -230,61 +232,10 @@ async function groupByTimeline(targetWindowId) {
     return;
   }
   
-  // Sort by creation time (earliest first)
-  validTabs.sort((a, b) => a.createdAt - b.createdAt);
+  // Use the tested groupByTimeline function from timeline-utils.js
+  const timeGroups = groupByTimeline(validTabs, timeThresholdMs);
   
-  // Group by date first, then by time within each date
-  const dateGroups = new Map();
-  
-  for (const tab of validTabs) {
-    const dateKey = new Date(tab.createdAt).toDateString();
-    if (!dateGroups.has(dateKey)) {
-      dateGroups.set(dateKey, []);
-    }
-    dateGroups.get(dateKey).push(tab);
-  }
-  
-  console.log(`Found ${dateGroups.size} different dates`);
-  
-  // Group within each date by time threshold
-  const timeGroups = [];
-  
-  for (const [dateKey, dateTabs] of dateGroups) {
-    dateTabs.sort((a, b) => a.createdAt - b.createdAt);
-    
-    let currentGroup = [dateTabs[0]];
-    let groupStartTime = dateTabs[0].createdAt;
-    
-    for (let i = 1; i < dateTabs.length; i++) {
-      const tab = dateTabs[i];
-      const prevTab = dateTabs[i - 1];
-      const timeDiff = tab.createdAt - prevTab.createdAt;
-      
-      if (timeDiff <= timeThresholdMs) {
-        currentGroup.push(tab);
-      } else {
-        if (currentGroup.length >= 1) {
-          timeGroups.push({
-            tabs: currentGroup,
-            startTime: groupStartTime,
-            endTime: dateTabs[i - 1].createdAt
-          });
-        }
-        currentGroup = [tab];
-        groupStartTime = tab.createdAt;
-      }
-    }
-    
-    if (currentGroup.length >= 1) {
-      timeGroups.push({
-        tabs: currentGroup,
-        startTime: groupStartTime,
-        endTime: currentGroup[currentGroup.length - 1].createdAt
-      });
-    }
-  }
-  
-  console.log(`Created ${timeGroups.length} time groups across ${dateGroups.size} dates`);
+  console.log(`Created ${timeGroups.length} time groups`);
   
   // Ungroup all first
   await ungroupTabs(tabs);
@@ -309,29 +260,6 @@ async function groupByTimeline(targetWindowId) {
         console.error(`Failed to create timeline group: ${error.message}`);
       }
     }
-  }
-}
-
-function formatTimeRange(startTime, endTime) {
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-  const now = new Date();
-  
-  const isToday = start.toDateString() === now.toDateString();
-  
-  if (isToday) {
-    const formatTime = (date) => {
-      return date.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
-    };
-    return `${formatTime(start)}-${formatTime(end)}`;
-  } else {
-    const month = start.getMonth() + 1;
-    const day = start.getDate();
-    return `${month}/${day}`;
   }
 }
 
@@ -499,17 +427,7 @@ function isDocsSite(domain) {
   return docsSites.some(d => domain === d || domain.endsWith('.' + d));
 }
 
-// ==================== Color Helpers ====================
-
-const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
-
-function getGroupColor(groupKey) {
-  let hash = 0;
-  for (let i = 0; i < groupKey.length; i++) {
-    hash = groupKey.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length];
-}
+// ==================== Helpers ====================
 
 function truncateTitle(title, maxLength) {
   if (title.length <= maxLength) return title;

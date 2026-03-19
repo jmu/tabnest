@@ -1,10 +1,11 @@
 {
   "name": "tabnest",
-  "version": "1.0.8",
+  "version": "1.1.0",
+  "type": "module",
   "description": "智能 Chrome 标签页分组扩展 - 基于 URL 层级结构、时间线和内容理解。",
   "main": "background.js",
   "scripts": {
-    "test": "jest --verbose"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose"
   },
   "repository": {
     "type": "git",

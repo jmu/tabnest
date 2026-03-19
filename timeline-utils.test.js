@@ -1,6 +1,6 @@
 // timeline-utils.test.js - Unit tests for timeline grouping
 
-const { formatTimeRange, groupByTimeline, getGroupColor, GROUP_COLORS } = require('./timeline-utils');
+import { formatTimeRange, groupByTimeline, getGroupColor, GROUP_COLORS } from './timeline-utils.js';
 
 describe('formatTimeRange', () => {
   test('should show time range for today', () => {
@@ -40,7 +40,6 @@ describe('formatTimeRange', () => {
   });
   
   test('should use default now parameter (Date.now())', () => {
-    // Test without passing now parameter - uses Date.now() as default
     const today = new Date();
     const startTime = new Date(today);
     startTime.setHours(9, 0, 0, 0);
@@ -48,13 +47,11 @@ describe('formatTimeRange', () => {
     endTime.setHours(9, 5, 0, 0);
     
     const result = formatTimeRange(startTime.getTime(), endTime.getTime());
-    // Should show time range since it's today
     expect(result).toMatch(/^\d{2}:\d{2}-\d{2}:\d{2}$/);
   });
 });
 
 describe('groupByTimeline', () => {
-  // Helper to create timestamp
   const t = (dateStr) => new Date(dateStr).getTime();
   
   test('should return empty array for empty input', () => {
@@ -74,11 +71,11 @@ describe('groupByTimeline', () => {
   test('should group tabs within time threshold', () => {
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T09:00:00') },
-      { id: 2, createdAt: t('2026-03-13T09:02:00') }, // 2 min gap
-      { id: 3, createdAt: t('2026-03-13T09:04:00') }, // 2 min gap
+      { id: 2, createdAt: t('2026-03-13T09:02:00') },
+      { id: 3, createdAt: t('2026-03-13T09:04:00') },
     ];
     
-    const result = groupByTimeline(tabs, 5 * 60 * 1000); // 5 min threshold
+    const result = groupByTimeline(tabs, 5 * 60 * 1000);
     
     expect(result.length).toBe(1);
     expect(result[0].tabs.length).toBe(3);
@@ -88,7 +85,7 @@ describe('groupByTimeline', () => {
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T09:00:00') },
       { id: 2, createdAt: t('2026-03-13T09:02:00') },
-      { id: 3, createdAt: t('2026-03-13T09:20:00') }, // 18 min gap > 5 min
+      { id: 3, createdAt: t('2026-03-13T09:20:00') },
     ];
     
     const result = groupByTimeline(tabs, 5 * 60 * 1000);
@@ -102,13 +99,12 @@ describe('groupByTimeline', () => {
   
   test('should NEVER group tabs from different dates together', () => {
     const tabs = [
-      { id: 1, createdAt: t('2026-03-12T23:58:00') }, // Yesterday
-      { id: 2, createdAt: t('2026-03-13T00:02:00') }, // Today (4 min gap)
+      { id: 1, createdAt: t('2026-03-12T23:58:00') },
+      { id: 2, createdAt: t('2026-03-13T00:02:00') },
     ];
     
     const result = groupByTimeline(tabs, 5 * 60 * 1000);
     
-    // Should be 2 groups, even though time gap is only 4 minutes
     expect(result.length).toBe(2);
     expect(result[0].tabs.length).toBe(1);
     expect(result[0].tabs[0].id).toBe(1);
@@ -127,10 +123,8 @@ describe('groupByTimeline', () => {
     
     const result = groupByTimeline(tabs, 5 * 60 * 1000);
     
-    // Should be 3 groups (one per date)
     expect(result.length).toBe(3);
     
-    // Check each group has correct tabs
     const groupDates = result.map(g => new Date(g.startTime).toDateString());
     expect(groupDates).toContain('Tue Mar 10 2026');
     expect(groupDates).toContain('Wed Mar 11 2026');
@@ -146,10 +140,7 @@ describe('groupByTimeline', () => {
     
     const result = groupByTimeline(tabs, 5 * 60 * 1000);
     
-    // Should be 2 groups
     expect(result.length).toBe(2);
-    
-    // First group should have tabs 1 and 2 (sorted)
     expect(result[0].tabs.map(t => t.id)).toEqual([1, 2]);
     expect(result[1].tabs.map(t => t.id)).toEqual([3]);
   });
@@ -170,20 +161,15 @@ describe('groupByTimeline', () => {
   test('should handle midnight boundary correctly', () => {
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T23:58:00') },
-      { id: 2, createdAt: t('2026-03-14T00:02:00') }, // 4 min gap but different day
-      { id: 3, createdAt: t('2026-03-14T00:04:00') }, // 2 min gap from tab 2
+      { id: 2, createdAt: t('2026-03-14T00:02:00') },
+      { id: 3, createdAt: t('2026-03-14T00:04:00') },
     ];
     
     const result = groupByTimeline(tabs, 5 * 60 * 1000);
     
-    // Should be 2 groups
     expect(result.length).toBe(2);
-    
-    // First group: Mar 13
     expect(result[0].tabs.length).toBe(1);
     expect(result[0].tabs[0].id).toBe(1);
-    
-    // Second group: Mar 14
     expect(result[1].tabs.length).toBe(2);
     expect(result[1].tabs.map(t => t.id)).toEqual([2, 3]);
   });
@@ -191,10 +177,10 @@ describe('groupByTimeline', () => {
   test('should handle large time threshold', () => {
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T09:00:00') },
-      { id: 2, createdAt: t('2026-03-13T09:30:00') }, // 30 min gap
+      { id: 2, createdAt: t('2026-03-13T09:30:00') },
     ];
     
-    const result = groupByTimeline(tabs, 60 * 60 * 1000); // 1 hour threshold
+    const result = groupByTimeline(tabs, 60 * 60 * 1000);
     
     expect(result.length).toBe(1);
     expect(result[0].tabs.length).toBe(2);
@@ -203,11 +189,11 @@ describe('groupByTimeline', () => {
   test('should handle small time threshold', () => {
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T09:00:00') },
-      { id: 2, createdAt: t('2026-03-13T09:00:30') }, // 30 sec gap
-      { id: 3, createdAt: t('2026-03-13T09:02:00') }, // 90 sec gap from tab 2
+      { id: 2, createdAt: t('2026-03-13T09:00:30') },
+      { id: 3, createdAt: t('2026-03-13T09:02:00') },
     ];
     
-    const result = groupByTimeline(tabs, 60 * 1000); // 1 min threshold
+    const result = groupByTimeline(tabs, 60 * 1000);
     
     expect(result.length).toBe(2);
     expect(result[0].tabs.map(t => t.id)).toEqual([1, 2]);
@@ -215,13 +201,12 @@ describe('groupByTimeline', () => {
   });
   
   test('should use default time threshold (5 minutes)', () => {
-    // Test without passing timeThresholdMs - uses 5 min as default
     const tabs = [
       { id: 1, createdAt: t('2026-03-13T09:00:00') },
-      { id: 2, createdAt: t('2026-03-13T09:03:00') }, // 3 min gap < 5 min
+      { id: 2, createdAt: t('2026-03-13T09:03:00') },
     ];
     
-    const result = groupByTimeline(tabs); // No threshold passed
+    const result = groupByTimeline(tabs);
     
     expect(result.length).toBe(1);
     expect(result[0].tabs.length).toBe(2);
@@ -248,7 +233,6 @@ describe('getGroupColor', () => {
       colors.add(getGroupColor(key));
     }
     
-    // Should have some variety
     expect(colors.size).toBeGreaterThan(1);
   });
 });

@@ -5,7 +5,7 @@
  * - Today: show time range like "09:00-09:05"
  * - Not today: show date like "3/12"
  */
-function formatTimeRange(startTime, endTime, now = Date.now()) {
+export function formatTimeRange(startTime, endTime, now = Date.now()) {
   const start = new Date(startTime);
   const end = new Date(endTime);
   const nowDate = new Date(now);
@@ -44,7 +44,7 @@ function formatTimeRange(startTime, endTime, now = Date.now()) {
  * @param {number} timeThresholdMs - Time threshold in milliseconds
  * @returns {Array} Array of {tabs, startTime, endTime} groups
  */
-function groupByTimeline(tabs, timeThresholdMs = 5 * 60 * 1000) {
+export function groupByTimeline(tabs, timeThresholdMs = 5 * 60 * 1000) {
   if (tabs.length === 0) return [];
   
   // Sort by creation time (earliest first)
@@ -105,19 +105,12 @@ function groupByTimeline(tabs, timeThresholdMs = 5 * 60 * 1000) {
 /**
  * Get group color based on group key
  */
-const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
+export const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'];
 
-function getGroupColor(groupKey) {
+export function getGroupColor(groupKey) {
   let hash = 0;
   for (let i = 0; i < groupKey.length; i++) {
     hash = groupKey.charCodeAt(i) + ((hash << 5) - hash);
   }
   return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length];
 }
-
-module.exports = {
-  formatTimeRange,
-  groupByTimeline,
-  getGroupColor,
-  GROUP_COLORS
-};
